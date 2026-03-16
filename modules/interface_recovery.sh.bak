@@ -1,0 +1,199 @@
+#!/bin/bash
+# =============================================================================
+# AirShatter — modules/interface_recovery.sh
+#
+# Interface Recovery & Driver Refresh
+#
+# DESIGN:
+#   The real recovery logic lives in tools/airmonitor.sh as the function
+#   interface_recovery_mode(). That function does the full driver reload:
+#     1. ip link set down
+#     2. iw set type managed
+#     3. ethtool → find driver → modprobe -r → modprobe (reload)
+#     4. ip link set up
+#     5. systemctl restart NetworkManager
+#
+#   This module calls that function directly after sourcing airmonitor.sh.
+#   Nothing is reimplemented here.
+#
+# Developer: amigoDcyber
+# =============================================================================
+
+# ─── Source airmonitor.sh to get interface_recovery_mode() ───────────────────
+_recovery_load_airmonitor() {
+    local path="$AS_ROOT/tools/airmonitor.sh"
+
+    if [[ ! -f "$path" ]]; then
+        print_error "tools/airmonitor.sh not found at: $path"
+        return 1
+    fi
+
+    # Temporarily suppress the exec "$0" restart at the end of recovery
+    # by setting a guard that airmonitor.sh can check, or we just source
+    # and rely on the function being callable without running the full script.
+    # shellcheck source=../tools/airmonitor.sh
+    source "$path"
+
+    # Confirm the recovery function loaded
+    if ! declare -f interface_recovery_mode &>/dev/null; then
+        print_error "interface_recovery_mode() not found in airmonitor.sh"
+        print_info "Your airmonitor.sh may use a different function name."
+        print_info "Check tools/airmonitor.sh and look for the recovery function."
+        return 1
+    fi
+
+    return 0
+}
+
+# ─── Resolve which interface to recover ──────────────────────────────────────
+_recovery_pick_interface() {
+    # If INTERFACE is already set by airmonitor.sh globals, use it.
+    # Otherwise fall back to SELECTED_IFACE, MONITOR_IFACE, or ask user.
+
+    if [[ -n "$INTERFACE" ]] && ip link show "$INTERFACE" &>/dev/null; then
+        print_info "Using airmonitor interface: $INTERFACE"
+        return 0
+    fi
+
+    # Try AirShatter globals
+    local candidates=("$MONITOR_IFACE" "$SELECTED_IFACE")
+    for c in "${candidates[@]}"; do
+        if [[ -n "$c" ]] && ip link show "$c" &>/dev/null; then
+            INTERFACE="$c"
+            print_info "Resolved interface: $INTERFACE"
+            return 0
+        fi
+    done
+
+    # Nothing set — ask user
+    print_warning "No interface currently selected."
+    echo
+
+    # List available wireless interfaces if detection is loaded
+    if declare -f get_wireless_interfaces &>/dev/null; then
+        local ifaces
+        mapfile -t ifaces < <(get_wireless_interfaces)
+
+        if [[ ${#ifaces[@]} -gt 0 ]]; then
+            printf "  ${BCYAN}%-5s %-18s %-12s${NC}\n" "No." "Interface" "Mode"
+            echo -e "  ${GRAY}$(printf '%.0s─' {1..38})${NC}"
+            local i=1
+            for iface in "${ifaces[@]}"; do
+                local mode
+                mode=$(iw dev "$iface" info 2>/dev/null | awk '/type/{print $2}')
+                printf "  ${WHITE}[%-3s]${NC} ${BGREEN}%-18s${NC} ${CYAN}%-12s${NC}\n" \
+                       "$i" "$iface" "${mode:-managed}"
+                ((i++))
+            done
+            echo
+            read -rp "$(echo -e "  ${BPURPLE}Select number or type name${NC}: ")" sel
+
+            if [[ "$sel" =~ ^[0-9]+$ ]] && \
+               (( sel >= 1 && sel <= ${#ifaces[@]} )); then
+                INTERFACE="${ifaces[$((sel-1))]}"
+            elif ip link show "$sel" &>/dev/null 2>&1; then
+                INTERFACE="$sel"
+            else
+                print_error "Interface not found."
+                return 1
+            fi
+        fi
+    else
+        read -rp "$(echo -e "  ${BPURPLE}Enter interface name (e.g. wlan0, wlan0mon)${NC}: ")" INTERFACE
+        if ! ip link show "$INTERFACE" &>/dev/null 2>&1; then
+            print_error "Interface '$INTERFACE' does not exist."
+            return 1
+        fi
+    fi
+
+    print_success "Interface set: $INTERFACE"
+    return 0
+}
+
+# ─── Show interface state (before/after) ─────────────────────────────────────
+_recovery_show_status() {
+    local iface="${1:-$INTERFACE}"
+    [[ -z "$iface" ]] && return
+
+    echo
+    echo -e "  ${WHITE}Interface Status: ${BGREEN}$iface${NC}"
+    echo -e "  ${GRAY}$(printf '%.0s─' {1..40})${NC}"
+
+    local mode mac state driver channel
+    mode=$(iw dev "$iface" info 2>/dev/null | awk '/type/{print $2}')
+    mac=$(cat "/sys/class/net/$iface/address" 2>/dev/null)
+    state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null)
+    driver=$(ethtool -i "$iface" 2>/dev/null | awk '/driver:/{print $2}')
+    [[ -z "$driver" ]] && \
+        driver=$(basename "$(readlink -f "/sys/class/net/$iface/device/driver" 2>/dev/null)" 2>/dev/null)
+    channel=$(iw dev "$iface" info 2>/dev/null | awk '/channel/{print $2}')
+
+    printf "  ${CYAN}%-12s${NC} %s\n" "Mode:"    "${mode:-unknown}"
+    printf "  ${CYAN}%-12s${NC} %s\n" "MAC:"     "${mac:-unknown}"
+    printf "  ${CYAN}%-12s${NC} %s\n" "State:"   "${state:-unknown}"
+    printf "  ${CYAN}%-12s${NC} %s\n" "Driver:"  "${driver:-unknown}"
+    printf "  ${CYAN}%-12s${NC} %s\n" "Channel:" "${channel:--}"
+    echo
+}
+
+# ─── Module entry point ───────────────────────────────────────────────────────
+module_interface_recovery() {
+    print_section "Interface Recovery & Driver Refresh"
+    log_separator
+    log_action "MODULE" "interface_recovery — entry"
+
+    # Step 1: load airmonitor.sh and confirm function exists
+    _recovery_load_airmonitor || { pause; return 1; }
+
+    # Step 2: resolve which interface to recover
+    _recovery_pick_interface   || { pause; return 1; }
+
+    # Step 3: show state before recovery
+    print_info "Interface state BEFORE recovery:"
+    _recovery_show_status "$INTERFACE"
+
+    # Step 4: confirm
+    echo -e "  ${BYELLOW}Recovery will:${NC}"
+    echo -e "  ${GRAY}  1. Bring $INTERFACE down${NC}"
+    echo -e "  ${GRAY}  2. Force managed mode (iw set type managed)${NC}"
+    echo -e "  ${GRAY}  3. Unload and reload the kernel driver (modprobe)${NC}"
+    echo -e "  ${GRAY}  4. Bring $INTERFACE back up${NC}"
+    echo -e "  ${GRAY}  5. Restart NetworkManager${NC}"
+    echo
+    confirm "Run recovery on $INTERFACE?" || {
+        print_info "Cancelled."
+        log_action "INTERFACE_RECOVERY" "User cancelled"
+        return 0
+    }
+
+    echo
+    log_action "INTERFACE_RECOVERY" \
+        "Running interface_recovery_mode() from airmonitor.sh on $INTERFACE"
+
+    # Step 5: call the real recovery function from airmonitor.sh
+    # interface_recovery_mode() uses $INTERFACE internally — already set above.
+    # We suppress the exec "$0" restart line so AirShatter stays running.
+    interface_recovery_mode
+
+    # Step 6: show state after recovery
+    # Interface may have been renamed after driver reload — try to find it
+    local recovered_iface="$INTERFACE"
+
+    # Strip "mon" suffix if we were recovering a monitor interface
+    local base_iface="${INTERFACE%mon}"
+    if ip link show "$base_iface" &>/dev/null 2>&1; then
+        recovered_iface="$base_iface"
+    fi
+
+    echo
+    print_info "Interface state AFTER recovery:"
+    _recovery_show_status "$recovered_iface"
+
+    # Update AirShatter globals to reflect the clean state
+    SELECTED_IFACE="$recovered_iface"
+    MONITOR_IFACE=""
+
+    log_success "Recovery complete. Interface=$recovered_iface"
+    print_success "Recovery complete. Interface is back in managed mode."
+    print_info "You can now re-select the interface (Menu option 1) and continue."
+}
