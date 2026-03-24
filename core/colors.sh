@@ -52,39 +52,3 @@ confirm() {
     read -rp "$(echo -e "  ${BPURPLE}[?]${NC} ${PURPLE}${msg} [y/N]${NC}: ")" ans
     [[ "${ans,,}" == "y" ]]
 }
-
-# ─── Terminal helper ──────────────────────────────────────────────────────────
-# Detects the best available terminal emulator: uxterm > xterm
-get_best_terminal() {
-    if command -v uxterm &>/dev/null; then
-        echo "uxterm"
-    elif command -v xterm &>/dev/null; then
-        echo "xterm"
-    else
-        echo ""
-    fi
-}
-
-# Launches a command in an external terminal window
-# Usage: _run_external_terminal "Window Title" command arg1 arg2 ...
-_run_external_terminal() {
-    local title="$1"; shift
-    local term
-    term=$(get_best_terminal)
-
-    if [[ -n "$term" ]]; then
-        # Use -hold for xterm/uxterm so window stays open after command exits
-        $term -hold -title "$title" \
-              -bg black -fg cyan \
-              -fa 'Monospace' -fs 10 \
-              -e "$@" &
-        echo $!
-    else
-        # Fallback to current terminal if no emulator found
-        print_warning "No external terminal found (xterm/uxterm) — running in current session."
-        "$@"
-        # We don't have a PID to return in this case that makes sense for backgrounding,
-        # but we'll return 0 to indicate it ran.
-        echo 0
-    fi
-}

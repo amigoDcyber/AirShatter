@@ -40,17 +40,7 @@ _launch_cracker_standalone() {
         export AS_PRESELECTED_CAP="$cap_file"
     fi
 
-    local term
-    term=$(get_best_terminal)
-
-    if [[ -n "$term" ]]; then
-        print_info "Launching cracker.sh in a new window..."
-        _run_external_terminal "AirShatter — Password Auditor" bash "$cracker_path" > /dev/null
-        print_info "Auditor running in a separate window. You can continue here."
-    else
-        bash "$cracker_path"
-    fi
-
+    bash "$cracker_path"
     unset AS_PRESELECTED_CAP
 }
 
