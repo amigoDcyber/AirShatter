@@ -32,7 +32,7 @@ _source_core() {
 # ─── Source feature modules ───────────────────────────────────────────────────
 _source_modules() {
     local f
-    for f in interface_manager scanner capture_manager analyzer crack_module interface_recovery; do
+    for f in interface_manager scanner capture_manager analyzer crack_module interface_recovery client_test; do
         local path="$AS_ROOT/modules/${f}.sh"
         if [[ ! -f "$path" ]]; then
             echo "WARNING: Missing module: $path"
@@ -137,11 +137,12 @@ main_menu() {
         echo -e "  ${BCYAN}[7]${NC}  ${WHITE}Interface Recovery${NC}            ${GRAY}(airmonitor recovery mode)${NC}"
         echo -e "  ${BGREEN}[8]${NC}  ${WHITE}View Logs${NC}"
         echo -e "  ${BGREEN}[9]${NC}  ${WHITE}Restore Managed Mode${NC}"
+        echo -e "  ${BPURPLE}[10]${NC}${WHITE} Lab Client Disconnect Test${NC}"
         echo
         echo -e "  ${BRED}[0]${NC}  ${WHITE}Exit${NC}"
         echo
 
-        read -rp "$(echo -e "  ${BPURPLE}Choice [0-9]${NC}: ")" opt
+        read -rp "$(echo -e "  ${BPURPLE}Choice [0-10]${NC}: ")" opt
 
         case "$opt" in
             1)
@@ -180,6 +181,10 @@ main_menu() {
                 module_restore_managed
                 log_action "MENU" "9 — restore managed"
                 ;;
+            10)
+                module_client_test
+                log_action "MENU" "10 — client test"
+                ;;
             0|q|Q)
                 echo
                 echo -e "${BGREEN}  ✓ Session complete. Stay legal. 👾${NC}"
@@ -189,7 +194,7 @@ main_menu() {
                 exit 0
                 ;;
             *)
-                print_error "Invalid option: '$opt' — choose 0-9"
+                print_error "Invalid option: '$opt' — choose 0-10"
                 sleep 0.5
                 continue
                 ;;
