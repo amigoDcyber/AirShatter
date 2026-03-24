@@ -294,7 +294,8 @@ _run_combined_capture() {
     echo -e "  ${CYAN}Output   :${NC} $cap_file"
     echo -e "  ${BCYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo
-    print_info "Polling for handshake every 5s. Press Ctrl+C to stop manually."
+    print_warning "Capture is running. Monitor the external terminal for results."
+    print_info "Press Ctrl+C in this window to stop and return to menu."
     echo
 
     local elapsed=0
@@ -321,33 +322,17 @@ _run_combined_capture() {
 
         [[ "$keep_running" == "false" ]] && break
 
-        # ── Wait then poll ────────────────────────────────────────────────────
-        sleep 5
+        # ── Wait interval (checks for exit every 1s) ──────────────────────────
+        local i
+        for ((i=0; i<5; i++)); do
+            sleep 1
+            [[ "$keep_running" == "false" ]] && break 2
+        done
         (( elapsed += 5 ))
-
-        [[ "$keep_running" == "false" ]] && break
-
-        # ── Check for handshake ───────────────────────────────────────────────
-        printf "  ${GRAY}[%3ds]${NC} Checking for handshake in %s...\n" \
-               "$elapsed" "$(basename "$cap_file")"
-
-        if _handshake_found "$cap_file"; then
-            echo
-            echo -e "  ${BGREEN}╔══════════════════════════════════════════════╗${NC}"
-            echo -e "  ${BGREEN}║   🤝  HANDSHAKE CAPTURED!                    ║${NC}"
-            echo -e "  ${BGREEN}╚══════════════════════════════════════════════╝${NC}"
-            echo
-            # Stop airodump cleanly
-            kill "$airodump_pid" 2>/dev/null
-            wait "$airodump_pid" 2>/dev/null
-            airodump_pid=""
-            trap - EXIT INT TERM
-            return 0
-        fi
 
         # ── Passive mode: no deauth — just wait with a dot ticker ─────────────
         if (( deauth_count == 0 )); then
-            printf "  ${GRAY}[%3ds]${NC} Waiting for client to authenticate naturally...\n" \
+            printf "  ${GRAY}[%3ds]${NC} Waiting for handshake... (Ctrl+C to stop)\n" \
                    "$elapsed"
         fi
 
