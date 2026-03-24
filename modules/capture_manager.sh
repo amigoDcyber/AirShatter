@@ -19,12 +19,20 @@
 
 CAPTURE_DIR="${AS_ROOT}/captures"
 
-# ─── Terminal helper fallback ─────────────────────────────────────────────────
-# Centralized terminal helper is now in core/colors.sh as _run_external_terminal.
-# This legacy helper is kept for partial backward compatibility.
+# ─── xterm helper (used for broad/passive mode only) ──────────────────────────
 _capture_in_xterm() {
     local title="$1"; shift
-    _run_external_terminal "$title" "$@"
+    if command -v xterm &>/dev/null; then
+        xterm -title "$title" \
+              -bg black -fg cyan \
+              -fa 'Monospace' -fs 10 \
+              -hold \
+              -e "$@"
+    else
+        print_warning "xterm not found — running inline (Ctrl+C to stop)."
+        echo
+        "$@"
+    fi
 }
 
 # ─── Pick an existing capture file (used by analyzer + crack modules) ─────────
@@ -246,37 +254,24 @@ _run_combined_capture() {
 
     local cap_file="${out_prefix}-01.cap"
     local airodump_pid="" aireplay_pid=""
-    local keep_running=true
 
     # ── Cleanup handler — kills both bg processes on exit/Ctrl+C ──────────────
     _combined_cleanup() {
-        # Kill the terminal window/airodump
-        if [[ -n "$airodump_pid" ]]; then
-            # We try to kill the process group or children if it's a terminal emulator
-            pkill -P "$airodump_pid" 2>/dev/null
-            kill "$airodump_pid" 2>/dev/null
-        fi
-
-        # Kill aireplay if it's running
+        [[ -n "$airodump_pid" ]] && kill "$airodump_pid" 2>/dev/null
         [[ -n "$aireplay_pid" ]] && kill "$aireplay_pid" 2>/dev/null
-
-        # Clean up any leftover airodump-ng processes for this interface
-        pgrep -f "airodump-ng.*$mon_iface" | xargs kill 2>/dev/null
-
         wait "$airodump_pid" "$aireplay_pid" 2>/dev/null
     }
-    trap 'keep_running=false; _combined_cleanup' EXIT INT TERM
+    trap _combined_cleanup EXIT INT TERM
 
-    # ── Start airodump-ng in an external terminal window ──────────────────────
-    local airodump_title="AirShatter Capture — $bssid (CH $channel)"
-    airodump_pid=$(_run_external_terminal "$airodump_title" \
-        airodump-ng \
-            --bssid   "$bssid" \
-            --channel "$channel" \
-            --write   "$out_prefix" \
-            --output-format pcap,csv \
-            --write-interval 5 \
-            "$mon_iface" )
+    # ── Start airodump-ng in background ───────────────────────────────────────
+    airodump-ng \
+        --bssid   "$bssid" \
+        --channel "$channel" \
+        --write   "$out_prefix" \
+        --output-format pcap,csv \
+        --write-interval 5 \
+        "$mon_iface" &>/dev/null &
+    airodump_pid=$!
 
     sleep 2   # give airodump a moment to initialize
 
@@ -294,14 +289,13 @@ _run_combined_capture() {
     echo -e "  ${CYAN}Output   :${NC} $cap_file"
     echo -e "  ${BCYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo
-    print_warning "Capture is running. Monitor the external terminal for results."
-    print_info "Press Ctrl+C in this window to stop and return to menu."
+    print_info "Polling for handshake every 5s. Press Ctrl+C to stop manually."
     echo
 
     local elapsed=0
     local burst=0
 
-    while [[ "$keep_running" == "true" ]]; do
+    while true; do
 
         # ── Send deauth burst (skip if passive mode) ───────────────────────────
         if (( deauth_count > 0 )); then
@@ -320,19 +314,31 @@ _run_combined_capture() {
             aireplay_pid=""
         fi
 
-        [[ "$keep_running" == "false" ]] && break
-
-        # ── Wait interval (checks for exit every 1s) ──────────────────────────
-        local i
-        for ((i=0; i<5; i++)); do
-            sleep 1
-            [[ "$keep_running" == "false" ]] && break 2
-        done
+        # ── Wait then poll ────────────────────────────────────────────────────
+        sleep 5
         (( elapsed += 5 ))
+
+        # ── Check for handshake ───────────────────────────────────────────────
+        printf "  ${GRAY}[%3ds]${NC} Checking for handshake in %s...\n" \
+               "$elapsed" "$(basename "$cap_file")"
+
+        if _handshake_found "$cap_file"; then
+            echo
+            echo -e "  ${BGREEN}╔══════════════════════════════════════════════╗${NC}"
+            echo -e "  ${BGREEN}║   🤝  HANDSHAKE CAPTURED!                    ║${NC}"
+            echo -e "  ${BGREEN}╚══════════════════════════════════════════════╝${NC}"
+            echo
+            # Stop airodump cleanly
+            kill "$airodump_pid" 2>/dev/null
+            wait "$airodump_pid" 2>/dev/null
+            airodump_pid=""
+            trap - EXIT INT TERM
+            return 0
+        fi
 
         # ── Passive mode: no deauth — just wait with a dot ticker ─────────────
         if (( deauth_count == 0 )); then
-            printf "  ${GRAY}[%3ds]${NC} Waiting for handshake... (Ctrl+C to stop)\n" \
+            printf "  ${GRAY}[%3ds]${NC} Waiting for client to authenticate naturally...\n" \
                    "$elapsed"
         fi
 

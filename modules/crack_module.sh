@@ -40,17 +40,7 @@ _launch_cracker_standalone() {
         export AS_PRESELECTED_CAP="$cap_file"
     fi
 
-    local term
-    term=$(get_best_terminal)
-
-    if [[ -n "$term" ]]; then
-        print_info "Launching cracker.sh in a new window..."
-        _run_external_terminal "AirShatter — Password Auditor" bash "$cracker_path" > /dev/null
-        print_info "Auditor running in a separate window. You can continue here."
-    else
-        bash "$cracker_path"
-    fi
-
+    bash "$cracker_path"
     unset AS_PRESELECTED_CAP
 }
 
@@ -146,16 +136,13 @@ _run_crack_inline() {
 
     log_action "CRACK_START" "File=$(basename "$file") Wordlist=$(basename "$wordlist")"
 
-    local hashcat_title="AirShatter Auditor — $(basename "$file")"
-    _run_external_terminal "$hashcat_title" \
-        hashcat -m 22000 "$hc22000" "$wordlist" \
-            --hwmon-disable \
-            --potfile-path "$pot" \
-            --status \
-            --status-timer=10 > /dev/null
-
-    print_info "Hashcat running in a new window. Wait for it to finish or close it to stop."
-    pause
+    hashcat -m 22000 "$hc22000" "$wordlist" \
+        --hwmon-disable \
+        --quiet \
+        --potfile-path "$pot" \
+        --status \
+        --status-timer=10 \
+        2>/dev/null
 
     echo
     # Step 4: show results
