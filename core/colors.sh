@@ -82,9 +82,7 @@ _run_external_terminal() {
     else
         # Fallback to current terminal if no emulator found
         print_warning "No external terminal found (xterm/uxterm) — running in current session."
-        "$@"
-        # We don't have a PID to return in this case that makes sense for backgrounding,
-        # but we'll return 0 to indicate it ran.
-        echo 0
+        "$@" &
+        echo $!
     fi
 }

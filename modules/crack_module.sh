@@ -146,13 +146,16 @@ _run_crack_inline() {
 
     log_action "CRACK_START" "File=$(basename "$file") Wordlist=$(basename "$wordlist")"
 
-    hashcat -m 22000 "$hc22000" "$wordlist" \
-        --hwmon-disable \
-        --quiet \
-        --potfile-path "$pot" \
-        --status \
-        --status-timer=10 \
-        2>/dev/null
+    local hashcat_title="AirShatter Auditor — $(basename "$file")"
+    _run_external_terminal "$hashcat_title" \
+        hashcat -m 22000 "$hc22000" "$wordlist" \
+            --hwmon-disable \
+            --potfile-path "$pot" \
+            --status \
+            --status-timer=10 > /dev/null
+
+    print_info "Hashcat running in a new window. Wait for it to finish or close it to stop."
+    pause
 
     echo
     # Step 4: show results

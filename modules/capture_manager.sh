@@ -246,6 +246,7 @@ _run_combined_capture() {
 
     local cap_file="${out_prefix}-01.cap"
     local airodump_pid="" aireplay_pid=""
+    local keep_running=true
 
     # ── Cleanup handler — kills both bg processes on exit/Ctrl+C ──────────────
     _combined_cleanup() {
@@ -264,7 +265,7 @@ _run_combined_capture() {
 
         wait "$airodump_pid" "$aireplay_pid" 2>/dev/null
     }
-    trap _combined_cleanup EXIT INT TERM
+    trap 'keep_running=false; _combined_cleanup' EXIT INT TERM
 
     # ── Start airodump-ng in an external terminal window ──────────────────────
     local airodump_title="AirShatter Capture — $bssid (CH $channel)"
@@ -299,7 +300,7 @@ _run_combined_capture() {
     local elapsed=0
     local burst=0
 
-    while true; do
+    while [[ "$keep_running" == "true" ]]; do
 
         # ── Send deauth burst (skip if passive mode) ───────────────────────────
         if (( deauth_count > 0 )); then
@@ -318,9 +319,13 @@ _run_combined_capture() {
             aireplay_pid=""
         fi
 
+        [[ "$keep_running" == "false" ]] && break
+
         # ── Wait then poll ────────────────────────────────────────────────────
         sleep 5
         (( elapsed += 5 ))
+
+        [[ "$keep_running" == "false" ]] && break
 
         # ── Check for handshake ───────────────────────────────────────────────
         printf "  ${GRAY}[%3ds]${NC} Checking for handshake in %s...\n" \
