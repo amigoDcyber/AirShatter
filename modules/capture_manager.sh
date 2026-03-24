@@ -19,20 +19,12 @@
 
 CAPTURE_DIR="${AS_ROOT}/captures"
 
-# ─── xterm helper (used for broad/passive mode only) ──────────────────────────
+# ─── Terminal helper fallback ─────────────────────────────────────────────────
+# Centralized terminal helper is now in core/colors.sh as _run_external_terminal.
+# This legacy helper is kept for partial backward compatibility.
 _capture_in_xterm() {
     local title="$1"; shift
-    if command -v xterm &>/dev/null; then
-        xterm -title "$title" \
-              -bg black -fg cyan \
-              -fa 'Monospace' -fs 10 \
-              -hold \
-              -e "$@"
-    else
-        print_warning "xterm not found — running inline (Ctrl+C to stop)."
-        echo
-        "$@"
-    fi
+    _run_external_terminal "$title" "$@"
 }
 
 # ─── Pick an existing capture file (used by analyzer + crack modules) ─────────
@@ -257,21 +249,33 @@ _run_combined_capture() {
 
     # ── Cleanup handler — kills both bg processes on exit/Ctrl+C ──────────────
     _combined_cleanup() {
-        [[ -n "$airodump_pid" ]] && kill "$airodump_pid" 2>/dev/null
+        # Kill the terminal window/airodump
+        if [[ -n "$airodump_pid" ]]; then
+            # We try to kill the process group or children if it's a terminal emulator
+            pkill -P "$airodump_pid" 2>/dev/null
+            kill "$airodump_pid" 2>/dev/null
+        fi
+
+        # Kill aireplay if it's running
         [[ -n "$aireplay_pid" ]] && kill "$aireplay_pid" 2>/dev/null
+
+        # Clean up any leftover airodump-ng processes for this interface
+        pgrep -f "airodump-ng.*$mon_iface" | xargs kill 2>/dev/null
+
         wait "$airodump_pid" "$aireplay_pid" 2>/dev/null
     }
     trap _combined_cleanup EXIT INT TERM
 
-    # ── Start airodump-ng in background ───────────────────────────────────────
-    airodump-ng \
-        --bssid   "$bssid" \
-        --channel "$channel" \
-        --write   "$out_prefix" \
-        --output-format pcap,csv \
-        --write-interval 5 \
-        "$mon_iface" &>/dev/null &
-    airodump_pid=$!
+    # ── Start airodump-ng in an external terminal window ──────────────────────
+    local airodump_title="AirShatter Capture — $bssid (CH $channel)"
+    airodump_pid=$(_run_external_terminal "$airodump_title" \
+        airodump-ng \
+            --bssid   "$bssid" \
+            --channel "$channel" \
+            --write   "$out_prefix" \
+            --output-format pcap,csv \
+            --write-interval 5 \
+            "$mon_iface" )
 
     sleep 2   # give airodump a moment to initialize
 

@@ -6,16 +6,21 @@
 # Supports: 2.4GHz (ch 1-14), 5GHz (ch 36-165), 6GHz (ch 1-233)
 # =============================================================================
 
-# ─── xterm launcher ───────────────────────────────────────────────────────────
+# ─── Terminal helper fallback ─────────────────────────────────────────────────
+# Centralized terminal helper is now in core/colors.sh as _run_external_terminal.
 _run_in_xterm() {
     local title="$1"; shift
-    if command -v xterm &>/dev/null; then
-        xterm -title "$title" \
-              -bg black -fg green \
-              -fa 'Monospace' -fs 10 \
-              -hold \
-              -e "$@"
+    local term
+    term=$(get_best_terminal)
+
+    if [[ -n "$term" ]]; then
+        # Launch asynchronously in xterm/uxterm so the user can see it
+        # and then close it when ready.
+        _run_external_terminal "$title" "$@" > /dev/null
+        print_info "Scanning in a new window. Return here after closing it."
+        pause
     else
+        # Fallback to current terminal (synchronous)
         print_warning "xterm not found — running in current terminal."
         print_info "Press Ctrl+C when done scanning."
         echo
