@@ -167,7 +167,7 @@ choose_wordlist() {
                 print_success "Using rockyou.txt"
             elif [[ -f "$rk_gz" ]]; then
                 print_info "Extracting rockyou.txt.gz..."
-                sudo gzip -dk "$rk_gz" 2>/dev/null && WORDLIST="$rk" || {
+                gzip -dk "$rk_gz" 2>/dev/null && WORDLIST="$rk" || {
                     print_error "Failed to extract rockyou.txt.gz"
                     return 1
                 }
@@ -379,12 +379,14 @@ main_menu() {
 # ==========================================
 # ENTRY POINT
 # ==========================================
-if [[ $EUID -ne 0 ]]; then
-    print_warning "Running as non-root. Some features may need root for GPU access."
-    sleep 1
-fi
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    if [[ $EUID -ne 0 ]]; then
+        print_warning "Running as non-root. Some features may need root for GPU access."
+        sleep 1
+    fi
 
-show_banner
-setup_dirs
-check_deps
-main_menu
+    show_banner
+    setup_dirs
+    check_deps
+    main_menu
+fi
